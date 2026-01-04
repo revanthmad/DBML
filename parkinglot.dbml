@@ -1,0 +1,125 @@
+
+//***************************************
+//  Parking Entities - Lot, Level, Spot
+//****************************************
+
+Enum ServiceStatus {
+  IN_SERVICE
+  OUT_OF_SERVICE
+  UNDER_MAINTENANCE
+}
+
+Table ParkingLot {
+  LotID int [pk]
+  Code varchar(4) [not null]
+  NoOfLevels int [not null]
+  LotStatus ServiceStatus [not null]
+}
+
+Table ParkingLotLevel {
+  LevelID int [pk]
+  LotID int [ref: > ParkingLot.LotID]
+  LevelNumber int [not null]
+  LevelStatus ServiceStatus [not null]
+}
+
+Enum ParkingSpotType {
+  COMPACT
+  MEDIUM
+  LARGE
+}
+
+// Enum SpotState {
+//   AVAILABLE 
+//   RESERVED
+//   OCCUPIED
+//   PAYMENT_DUE
+//   EXIT_GRANTED
+//   UNDER_MAINTENANCE
+// }
+
+Enum ParkingSpotStatusType {
+  AVAILABLE
+  UNAVAILABLE
+  READY_TO_CHANGE
+}
+
+Table SpotStatusCode {
+  StatusCode char(4) [pk]
+  StatusType ParkingSpotStatusType
+  Description varchar(100)
+
+  note: '''
+    EMPT | AVAILABLE       | EMPTY
+    RESV | UNAVAILABLE     | RESERVED
+    OCCP | UNAVAILABLE     | OCCUPIED
+    PDUE | UNAVAILABLE     | PAYMENT_DUE 
+    EXGR | READY_TO_CHANGE | EXIT_GRANTED
+    MAIN | UNAVAILABLE     | UNDER_MAINTENANCE
+  '''
+}
+
+Table ParkingSpot {
+  SpotID int [pk]
+  LevelID int [ref: > ParkingLotLevel.LevelID]
+  Type ParkingSpotType [not null]
+  Control char(4) [ref: > SpotStatusCode.StatusCode]
+}
+
+//***************************************
+//  Vehicle Entity
+//****************************************
+
+Table VehicleType {
+  VehicleTypeID char(4) [pk]
+  TypeName varchar(20) [not null]
+
+  note: '''
+      2WLR = TWO_WHEELER
+      3WLR = THREE_WHEELER
+      4WLS = FOUR_WHEELER_COMPACT
+      4WLL = FOUR_WHEELER_LARGE
+      MWLR = MULTI_WHEELER
+    '''
+}
+
+Table Vehicle {
+  VehicleID int [pk]
+  VehicleTypeID char(4) [ref: > VehicleType.VehicleTypeID]
+  Company varchar(20) [not null]
+  Model varchar(10) [not null]
+  VehicleLicensePlate varchar(20) [not null] 
+}
+
+
+//***************************************
+//  Parking Sessions - Business Logic
+//****************************************
+
+Table ParkingEligibilityRule {
+  RuleID int [pk]
+  SpotType ParkingSpotType
+  StatusCode char(4) [ref: > SpotStatusCode.StatusCode]
+}
+
+Table VehicleSpotEligibility {
+  EligibilityID int [pk]
+  SpotID int [ref: > ParkingSpot.SpotID]
+  RuleID int [ref: > ParkingEligibilityRule.RuleID]
+  VehicleID int [ref: > Vehicle.VehicleID] 
+}
+
+Table Payment {
+  PaymentID uuid [pk, default: 'get_random_uuid()']
+  EligibilityID int [ref: > VehicleSpotEligibility.EligibilityID]
+  PaymentMetadata JSONB [note: 'Payload from the Payment Gateway']
+  ExternalID varchar [null, note: 'Payment Gateway Integration Platform ID']
+}
+
+Table ParkingSession {
+  SessionID int [pk]
+  PaymentID uuid [ref: > Payment.PaymentID]
+  EntryTime datetime [not null, default: "GETDATE()"]
+  ExitTime datetime [null]
+  IsExpired bit [not null, default: 0]
+}
