@@ -1,124 +1,176 @@
+Table LookUp {
+  Code char(2) [pk]
+  Catalog varchar(20) [not null, note: '''
+      Utils
+      ParkingSpot
+      Vehicle
+      Reservation
+      Payment
+    ''']
+  Subset varchar(50) [not null, note: '''
+    ServiceStatus
+    SpotType
+    VehicleType
+    SpotControl
+    ''']
+  Description varchar(100) [not null]
 
-//***************************************
-//  Parking Entities - Lot, Level, Spot
-//****************************************
+  note: '''
+    EAV type table for all Type and Status Lookup Codes.
 
-Enum ServiceStatus {
-  IN_SERVICE
-  OUT_OF_SERVICE
-  UNDER_MAINTENANCE
+      OS | Utils       | ServiceState | OUT_OF_SERVICE
+      MN | Utils       | ServiceState | UNDER_MAINTENANCE
+      OP | Utils       | ServiceState | OPEN_TO_SERVICE
+      RS | Utils       | ServiceState | RESERVED
+      OC | Utils       | ServiceState | OCCUPIED
+      TO | Utils       | ServiceState | TO_BE_OPEN
+
+      2S | ParkingSpot | SpotType     | EXTRA_SMALL for 2 - wheeler
+      SX | ParkingSpot | SpotType     | SMALL for 3 - wheeler & Compact Cars
+      MX | ParkingSpot | SpotType     | MEDIUM 
+      LX | ParkingSpot | SpotType     | LARGE
+
+      2W | Vehicle     | VehicleType  | TWO_WHEELER
+      3W | Vehicle     | VehicleType  | THREE_WHEELER
+      4C | Vehicle     | VehicleType  | FOUR_WHEELER_COMPACT
+      4L | Vehicle     | VehicleType  | FOUR_WHEELER_LARGE
+      MW | Vehicle     | VehicleType  | MULTI_WHEELER
+
+  '''
 }
 
 Table ParkingLot {
   LotID int [pk]
-  Code varchar(4) [not null]
+  LotCode char(2) [unique, not null]
+  LotState char(2) [not null]
   NoOfLevels int [not null]
-  LotStatus ServiceStatus [not null]
 }
 
 Table ParkingLotLevel {
-  LevelID int [pk]
+  LevelID int
   LotID int [ref: > ParkingLot.LotID]
-  LevelNumber int [not null]
-  LevelStatus ServiceStatus [not null]
+  LevelCode char(2) [unique, not null]
+  LevelState char(2) [not null]
+
+  indexes {
+    (LotID, LevelID) [pk]
+  }
 }
 
-Enum ParkingSpotType {
-  COMPACT
-  MEDIUM
-  LARGE
-}
-
-// Enum SpotState {
-//   AVAILABLE 
-//   RESERVED
-//   OCCUPIED
-//   PAYMENT_DUE
-//   EXIT_GRANTED
-//   UNDER_MAINTENANCE
-// }
-
-Enum ParkingSpotStatusType {
-  AVAILABLE
-  UNAVAILABLE
-  READY_TO_CHANGE
-}
-
-Table SpotStatusCode {
-  StatusCode char(4) [pk]
-  StatusType ParkingSpotStatusType
-  Description varchar(100)
-
-  note: '''
-    EMPT | AVAILABLE       | EMPTY
-    RESV | UNAVAILABLE     | RESERVED
-    OCCP | UNAVAILABLE     | OCCUPIED
-    PDUE | UNAVAILABLE     | PAYMENT_DUE 
-    EXGR | READY_TO_CHANGE | EXIT_GRANTED
-    MAIN | UNAVAILABLE     | UNDER_MAINTENANCE
-  '''
+TableGroup ParkingCatalog {
+  ParkingLot
+  ParkingLotLevel
+  ParkingSpot
 }
 
 Table ParkingSpot {
   SpotID int [pk]
   LevelID int [ref: > ParkingLotLevel.LevelID]
-  Type ParkingSpotType [not null]
-  Control char(4) [ref: > SpotStatusCode.StatusCode]
+  TypeCode varchar(2) [not null, default: 'SX',
+  note: '''
+    SELECT DISTINCT Code 
+    FROM LookUp 
+    WHERE Catalog = 'ParkingSpot' 
+      AND Subset = 'SpotType' 
+    
+    2S = EXTRA_SMALL for 2 - wheeler
+    SX = SMALL for 3 - wheeler & Compact Cars
+    MX = MEDIUM 
+    LX = LARGE
+  ''']
+  Control char(2) [not null, default: 'OP', note:'''
+    SELECT DISTINCT Code 
+    FROM LookUp 
+    WHERE Catalog = 'Utils' 
+      AND Subset = 'ServiceState' 
+
+    OS -> MN -> OP 
+    OP -> RS -> OC -> TV -> OP 
+  ''']
+
+  checks {
+    `Type IN ('SX', 'MX', 'LX')` [name: 'chk_Type_']
+    `Control IN ('IS','OS','NA')` [name: 'chk_Control_Service_Status']
+  }
 }
 
 //***************************************
 //  Vehicle Entity
 //****************************************
 
-Table VehicleType {
-  VehicleTypeID char(4) [pk]
-  TypeName varchar(20) [not null]
-
-  note: '''
-      2WLR = TWO_WHEELER
-      3WLR = THREE_WHEELER
-      4WLS = FOUR_WHEELER_COMPACT
-      4WLL = FOUR_WHEELER_LARGE
-      MWLR = MULTI_WHEELER
-    '''
-}
-
 Table Vehicle {
   VehicleID int [pk]
-  VehicleTypeID char(4) [ref: > VehicleType.VehicleTypeID]
+  TypeCode char(2) [not null, default: 'SX', note: '''
+      2W = TWO_WHEELER
+      3W = THREE_WHEELER
+      4C = FOUR_WHEELER_COMPACT
+      4L = FOUR_WHEELER_LARGE
+      MW = MULTI_WHEELER
+  ''']
+  VehicleLicensePlate varchar(20) [not null]
+  OwnerName varchar(50) [null]
   Company varchar(20) [not null]
   Model varchar(10) [not null]
-  VehicleLicensePlate varchar(20) [not null] 
-}
 
+  checks {
+    `Vehicle.TypeCode IN (
+      SELECT DISTINCT Code FROM LookUp 
+      WHERE Catalog = 'Vehicle' AND Subset = 'VehicleType'
+    )` [name: 'chk_Vehicle_TypeCode'] 
+  }
+}
 
 //***************************************
 //  Parking Sessions - Business Logic
 //****************************************
 
-Table ParkingEligibilityRule {
-  RuleID int [pk]
-  SpotType ParkingSpotType
-  StatusCode char(4) [ref: > SpotStatusCode.StatusCode]
+Table ReservationType {
+  TypeCode int [pk]
+  SpotTypeCode char(2) [not null, note: '''
+    {2X, SX, MX, LX}
+  ''']
+  VehicleTypeCode char(2) [not null, note: '''
+    {2W, 3W, 4C, 4L, MW}
+  ''']
+  ActiveStatus bit [not null, default: 1]
 }
 
-Table VehicleSpotEligibility {
-  EligibilityID int [pk]
+Table Reservation {
+  ReservationID uuid [pk, default: 'get_random_uuid()']
+  TypeCode int [ref: > ReservationType.TypeCode]
   SpotID int [ref: > ParkingSpot.SpotID]
-  RuleID int [ref: > ParkingEligibilityRule.RuleID]
   VehicleID int [ref: > Vehicle.VehicleID] 
+  IsValid bit [not null, default: 0, note: "Updated to 1 via trigger upon Payment.Status = 'SU'"]
+  // Status char(2) [not null, default: '']
+  ReserveFrom datetime [not null]
+  ReserveTill datetime [null]
+  CreateDate datetime [not null, default: 'GETDATE()']
 }
 
 Table Payment {
   PaymentID uuid [pk, default: 'get_random_uuid()']
-  EligibilityID int [ref: > VehicleSpotEligibility.EligibilityID]
+  ReservationID uid [ref: > Reservation.ReservationID]
+  TypeCode varchar(2) [not null, default: 'CS', note:'''
+    CS = CASH
+    CR = CREDIT_CARD
+    DB = DEBIT_CARD
+    NB = NET_BANKING
+    UP = UPI
+  ''']
+  ReasonCode varchar(2) [null, default: '', note:'''
+    RS = RESERVATION
+    PS = PRE_SESSION_ENTRY
+    XS = SESSION_POST_EXTRA
+  ''']
+  Amount decimal(7, 2) [not null]
+  Status varchar(2) [not null, default: 'NA']
   PaymentMetadata JSONB [note: 'Payload from the Payment Gateway']
   ExternalID varchar [null, note: 'Payment Gateway Integration Platform ID']
 }
 
 Table ParkingSession {
-  SessionID int [pk]
-  PaymentID uuid [ref: > Payment.PaymentID]
+  SessionID uuid [pk, default: 'get_random_uuid()']
+  ReservationID uuid [ref: > Reservation.ReservationID]
   EntryTime datetime [not null, default: "GETDATE()"]
   ExitTime datetime [null]
   IsExpired bit [not null, default: 0]
